@@ -3,6 +3,7 @@ package com.fomograb.uitests.pages;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
+import com.microsoft.playwright.options.WaitForSelectorState;
 
 import java.util.regex.Pattern;
 
@@ -52,6 +53,13 @@ public class DashboardPage extends BasePage {
     public DashboardPage openCategoryMenu() {
         categoryDropdownButton().click();
         categoryPanel().waitFor();
+        return this;
+    }
+
+    /** The trigger button is a toggle (Dashboard.tsx: {@code setCatDropOpen(o => !o)}), so this reuses it to close. */
+    public DashboardPage closeCategoryMenu() {
+        categoryDropdownButton().click();
+        categoryPanel().waitFor(new Locator.WaitForOptions().setState(WaitForSelectorState.HIDDEN));
         return this;
     }
 
@@ -116,6 +124,28 @@ public class DashboardPage extends BasePage {
         button.click();
         page.waitForCondition(() -> visibleProductCount() > before);
         return this;
+    }
+
+    // ── Session (header) ────────────────────────────────────────────────────
+
+    /** Only rendered when {@code user} is set — see App.tsx's {@code isAdminView}/gating logic. */
+    public Locator logoutButton() {
+        return page.getByTitle("Sign out of your account");
+    }
+
+    /** Only rendered for an anonymous visitor. */
+    public Locator loginHeaderButton() {
+        return page.getByTitle("Log in to your account");
+    }
+
+    public boolean isLoggedIn() {
+        return logoutButton().isVisible();
+    }
+
+    public void logout() {
+        logoutButton().click();
+        // Dashboard.tsx swaps the header buttons synchronously on logout — no navigation to wait on.
+        loginHeaderButton().waitFor();
     }
 
     // ── Preferences menu (hamburger) ────────────────────────────────────────

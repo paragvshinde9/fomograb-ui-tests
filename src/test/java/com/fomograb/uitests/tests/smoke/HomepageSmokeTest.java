@@ -4,9 +4,11 @@ import com.fomograb.uitests.core.BaseTest;
 import com.fomograb.uitests.core.Tags;
 import com.fomograb.uitests.pages.CookieConsentBanner;
 import com.fomograb.uitests.pages.DashboardPage;
+import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
 import org.testng.annotations.Test;
+import org.testng.asserts.SoftAssert;
 
 import java.util.regex.Pattern;
 
@@ -58,5 +60,28 @@ public class HomepageSmokeTest extends BaseTest {
 
         page.reload();
         assertThat(banner.acceptAllButton()).not().isVisible();
+    }
+
+    /**
+     * Uses {@link SoftAssert} on purpose: this checks six independent footer
+     * links (Dashboard.tsx's "Quick Links" column), and a regular {@code Assert}
+     * would stop at the first missing one — useless if a footer refactor drops
+     * three links at once, since you'd fix one, re-run, and discover the next.
+     * SoftAssert collects every failure and reports them together in one go.
+     */
+    @Test(description = "The footer's Quick Links column has all six expected links")
+    public void footerQuickLinksAreAllPresent() {
+        goTo("/");
+        Locator quickLinksColumn = page.locator(".footer-links").filter(new Locator.FilterOptions().setHasText("Quick Links"));
+
+        SoftAssert softly = new SoftAssert();
+        for (String linkText : new String[] {
+            "Home", "Best Phone Deals", "Best Laptop Deals", "Best TV Deals", "Gaming Deals", "Monitor Deals"
+        }) {
+            softly.assertTrue(
+                quickLinksColumn.getByRole(AriaRole.LINK, new Locator.GetByRoleOptions().setName(linkText)).isVisible(),
+                "Missing footer Quick Links entry: '" + linkText + "'");
+        }
+        softly.assertAll();
     }
 }

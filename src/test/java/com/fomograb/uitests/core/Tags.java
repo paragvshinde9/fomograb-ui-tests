@@ -26,4 +26,14 @@ public final class Tags {
      * block scripted logins/signups. See README "Environments".
      */
     public static final String PROD_SMOKE = "prod-smoke";
+
+    /**
+     * Multi-page journeys that stitch several page objects into one continuous
+     * session, as opposed to the single-feature tests elsewhere in the suite.
+     * Always combined with a second group ({@link #REGRESSION} or {@link #AUTH})
+     * so {@code -Dgroups=regression} etc. still picks them up — {@link #E2E}
+     * exists so they can *also* be run/reported on as their own slice with
+     * {@code -Dgroups=e2e}.
+     */
+    public static final String E2E = "e2e";
 }

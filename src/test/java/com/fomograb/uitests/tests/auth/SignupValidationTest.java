@@ -4,6 +4,7 @@ import com.fomograb.uitests.core.BaseTest;
 import com.fomograb.uitests.core.Tags;
 import com.fomograb.uitests.pages.SignupPage;
 import org.testng.Assert;
+import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 /**
@@ -49,5 +50,33 @@ public class SignupValidationTest extends BaseTest {
 
         String error = signup.submitExpectingValidationError();
         Assert.assertTrue(error.toLowerCase().contains("match"), "Expected a passwords-do-not-match message, got: " + error);
+    }
+
+    /**
+     * Table-driven companion to {@link #passwordShorterThanEightCharsIsRejected()}:
+     * that test pins down the single boundary case (7 chars), this one sweeps a
+     * few different lengths under it to catch an off-by-one in the app's own
+     * {@code password.length < 8} check without writing a near-identical method
+     * per length by hand.
+     */
+    @DataProvider(name = "shortPasswords")
+    public Object[][] shortPasswords() {
+        return new Object[][] {
+            {"A1"},
+            {"Abcd12"},
+            {"Abcdef1"},
+        };
+    }
+
+    @Test(dataProvider = "shortPasswords",
+        description = "Passwords of various lengths under the 8-character minimum are all rejected")
+    public void variousShortPasswordsAreRejected(String password) {
+        goTo("/signup");
+        SignupPage signup = new SignupPage(page);
+        signup.fillForm("Valid Name", "valid@example.com", password, password);
+
+        String error = signup.submitExpectingValidationError();
+        Assert.assertTrue(error.toLowerCase().contains("password"),
+            "Expected a password-length validation message for '" + password + "' (" + password.length() + " chars), got: " + error);
     }
 }

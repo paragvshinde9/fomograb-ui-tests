@@ -16,10 +16,18 @@
 -->
 <suite name="FomoGrab UI Suite" parallel="classes" thread-count="3">
 
-    <!-- No explicit Allure <listeners> block: allure-testng registers itself via
+    <!-- RetryTransformer must be declared explicitly (unlike Allure below, it has
+         no ServiceLoader auto-registration) — it wires RetryAnalyzer onto every
+         @Test method so a one-off UI flake doesn't fail the build. See its javadoc
+         for why the retry cap stays at 1.
+
+         No explicit Allure listener here: allure-testng registers itself via
          Java's ServiceLoader (its META-INF/services entry) the moment it's on the
-         classpath. Declaring it again here just produces a harmless but noisy
+         classpath. Declaring it again would just produce a harmless but noisy
          "Ignoring duplicate listener" warning per <test> block. -->
+    <listeners>
+        <listener class-name="com.fomograb.uitests.core.RetryTransformer"/>
+    </listeners>
 
     <test name="Smoke">
         <packages>
@@ -32,6 +40,7 @@
             <package name="com.fomograb.uitests.tests.browse"/>
             <package name="com.fomograb.uitests.tests.product"/>
             <package name="com.fomograb.uitests.tests.wishlist"/>
+            <package name="com.fomograb.uitests.tests.e2e"/>
         </packages>
     </test>
 

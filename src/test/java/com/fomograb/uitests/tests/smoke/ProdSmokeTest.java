@@ -27,13 +27,19 @@ public class ProdSmokeTest extends BaseTest {
     // canonical host directly avoids depending on that redirect in every check.
     private static final String PROD_URL = "https://www.fomograb.com";
 
-    @Test(description = "The live homepage renders with the FomoGrab title")
+    // Every method below sets an explicit timeOut: this is the one class that
+    // talks to a real, un-mocked, third-party-in-front-of-it (Vercel/Cloudflare)
+    // host outside our control. A hung DNS lookup or a stalled edge response
+    // should fail this test fast with a clear TestNG timeout, not silently eat
+    // BaseTest's default context timeout and make a CI job look stuck.
+
+    @Test(description = "The live homepage renders with the FomoGrab title", timeOut = 20_000)
     public void homepageLoads() {
         page.navigate(PROD_URL + "/");
         assertThat(page).hasTitle(Pattern.compile("FomoGrab", Pattern.CASE_INSENSITIVE));
     }
 
-    @Test(description = "robots.txt is served and points at the sitemap")
+    @Test(description = "robots.txt is served and points at the sitemap", timeOut = 15_000)
     public void robotsTxtIsServedAndPointsAtSitemap() {
         APIResponse response = context.request().get(PROD_URL + "/robots.txt");
         Assert.assertEquals(response.status(), 200);
@@ -42,7 +48,7 @@ public class ProdSmokeTest extends BaseTest {
         Assert.assertTrue(body.contains("Disallow: /admin"), "robots.txt should disallow /admin");
     }
 
-    @Test(description = "sitemap.xml is served as XML")
+    @Test(description = "sitemap.xml is served as XML", timeOut = 15_000)
     public void sitemapXmlIsServed() {
         APIResponse response = context.request().get(PROD_URL + "/sitemap.xml");
         Assert.assertEquals(response.status(), 200);
@@ -50,7 +56,7 @@ public class ProdSmokeTest extends BaseTest {
         Assert.assertTrue(contentType.contains("xml"), "Expected an XML content-type, got: " + contentType);
     }
 
-    @Test(description = "A direct product URL renders (validates SPA deep-linking + hosting rewrite)")
+    @Test(description = "A direct product URL renders (validates SPA deep-linking + hosting rewrite)", timeOut = 20_000)
     public void directProductUrlRenders() {
         // Discover one real slug from the live homepage rather than hardcoding one.
         page.navigate(PROD_URL + "/");

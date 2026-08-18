@@ -68,10 +68,12 @@ src/test/java/com/fomograb/uitests/
 │   │                         #   Context/Page lifecycle
 │   ├── Browsers.java         # picks chromium/firefox/webkit
 │   ├── FailureArtifacts.java # screenshot + trace capture, wired from BaseTest
-│   └── Tags.java             # TestNG group-name constants (smoke/regression/auth/prod-smoke)
+│   ├── RetryAnalyzer.java    # retries a failed test once (flake absorption, not bug-hiding)
+│   ├── RetryTransformer.java # auto-applies RetryAnalyzer to every @Test — registered in testng.xml
+│   └── Tags.java             # TestNG group-name constants (smoke/regression/auth/prod-smoke/e2e)
 ├── pages/                    # one class per screen — the Page Object Model
 │   ├── BasePage.java
-│   ├── DashboardPage.java    # home: search, category nav, product grid, "Load More"
+│   ├── DashboardPage.java    # home: search, category nav, product grid, "Load More", session/logout
 │   ├── LoginPage.java / SignupPage.java
 │   ├── ProductDetailPage.java
 │   ├── WishlistPage.java
@@ -80,10 +82,12 @@ src/test/java/com/fomograb/uitests/
 └── tests/                    # the actual test classes, one package per feature area
     ├── smoke/                # HomepageSmokeTest, ProdSmokeTest
     ├── browse/               # SearchAndBrowseTest
-    ├── auth/                 # LoginTest, SignupValidationTest, RouteGuardTest
+    ├── auth/                 # LoginTest, SignupValidationTest, RouteGuardTest,
+    │                         #   LoginSubmitDealLogoutE2ETest, SignupToVerificationE2ETest (disabled)
     ├── product/              # ProductDetailTest
     ├── wishlist/             # WishlistTest
-    └── submitdeal/           # SubmitDealTest
+    ├── submitdeal/           # SubmitDealTest
+    └── e2e/                  # BrowseToWishlistE2ETest — multi-page guest journeys
 testng.xml       # suite structure + parallelism (see "How parallelism works")
 pom.xml          # dependencies, default groups, Surefire wiring
 ```
@@ -186,6 +190,56 @@ Defined once as constants in `core/Tags.java` so a typo is a compile error:
 - **`auth`** — login/signup/gated-route/submit-deal. Rate-limited and
   single-threaded on purpose (see `testng.xml`).
 - **`prod-smoke`** — see "Environments" above.
+- **`e2e`** — multi-page journeys, always double-tagged with `regression` or
+  `auth` so they run under the normal groups too; use `-Dgroups=e2e` to run
+  just the journeys on their own.
+
+## E2E tests vs. everything else
+
+Most of this suite tests one feature in isolation (`ProductDetailTest` only
+cares about the product page, `WishlistTest` only cares about `/wishlist`).
+The `e2e` group instead stitches several pages into one continuous session —
+closer to how a real visitor actually moves through the site:
+
+- **`BrowseToWishlistE2ETest`** (guest, no login) — search for a real deal,
+  read its Prices/History tabs, wishlist it, find it on `/wishlist`, follow
+  "View Deal" back to the product, then remove it.
+- **`LoginSubmitDealLogoutE2ETest`** (needs a seeded account) — get gated to
+  `/login`, log in, submit a deal, confirm it's pending in My Submissions, log
+  out, and confirm the gate closes again — proving logout actually cleared the
+  session, not just the header.
+- **`SignupToVerificationE2ETest`** — present but `@Test(enabled = false)`;
+  see its Javadoc for exactly why (it would need to fire a real, un-cleanable
+  signup on every run to prove one screen transition) and what unlocks it.
+
+Each is written as **one long `@Test` method**, not several small ones —
+`BaseTest` gives every `@Test` method a fresh `BrowserContext`, so splitting a
+journey across methods would just lose the session between "steps."
+
+## Other TestNG features in play (and why)
+
+Beyond the basics, a few of TestNG's other annotations/attributes show up
+where they earn their place — not sprinkled in for their own sake:
+
+- **`RetryAnalyzer` + `RetryTransformer`** (`core/`) — every `@Test` gets one
+  automatic retry on failure, to absorb genuine UI flake (an animation/network
+  race) without masking real bugs. Capped at 1 retry on purpose — see the
+  Javadoc on `RetryAnalyzer` for the tradeoff with rate-limited auth tests.
+- **`@DataProvider`** (`SignupValidationTest.shortPasswords`) — sweeps several
+  password lengths under the 8-char minimum through one test method instead of
+  one near-identical method per length.
+- **`SoftAssert`** (`HomepageSmokeTest.footerQuickLinksAreAllPresent`) —
+  checks six independent footer links and reports every missing one in a
+  single run, instead of stopping at the first and playing whack-a-mole.
+- **`invocationCount`** (`SearchAndBrowseTest.categoryMenuOpensAndClosesReliably`) —
+  runs the same interaction 3 independent times to catch occasional timing
+  flake that a single run has a real chance of missing.
+- **`timeOut`** (`ProdSmokeTest`, every method) — an explicit cap on the one
+  class that talks to a real third-party-fronted host outside our control, so
+  a stalled edge response fails fast and visibly instead of hanging a CI job.
+- **`priority`** (`RouteGuardTest`) — purely for report readability (the tests
+  aren't order-dependent); the three "redirected" cases read as the rule and
+  the public-wishlist counterexample reads more clearly reported last.
 
 ## Reports
 

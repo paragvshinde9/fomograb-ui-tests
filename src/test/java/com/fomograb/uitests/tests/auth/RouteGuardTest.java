@@ -16,32 +16,38 @@ import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertTha
  * from localStorage and needs no account. Every test here starts from a fresh
  * {@link com.microsoft.playwright.BrowserContext} (see BaseTest), so there is
  * no session to clear first.
+ *
+ * <p>{@code priority} is set purely for report readability (these run
+ * single-threaded anyway per testng.xml, and each starts from a fresh
+ * context, so nothing here is functionally order-dependent): the three
+ * "redirected" cases read as the rule, and {@link #wishlistDoesNotRequireAuth()}
+ * reads more clearly as the deliberate exception when it's reported last.
  */
 @Test(groups = Tags.AUTH)
 public class RouteGuardTest extends BaseTest {
 
-    @Test(description = "Anonymous visitors to /submit-deal are redirected to /login")
+    @Test(priority = 1, description = "Anonymous visitors to /submit-deal are redirected to /login")
     public void submitDealRedirectsAnonymousToLogin() {
         goTo("/submit-deal");
         page.waitForURL(Pattern.compile(".*/login"));
         Assert.assertTrue(page.url().contains("/login"));
     }
 
-    @Test(description = "Anonymous visitors to /account are redirected to /login")
+    @Test(priority = 1, description = "Anonymous visitors to /account are redirected to /login")
     public void accountSettingsRedirectsAnonymousToLogin() {
         goTo("/account");
         page.waitForURL(Pattern.compile(".*/login"));
         Assert.assertTrue(page.url().contains("/login"));
     }
 
-    @Test(description = "Anonymous visitors to /alerts are redirected to /login")
+    @Test(priority = 1, description = "Anonymous visitors to /alerts are redirected to /login")
     public void dealAlertsRedirectsAnonymousToLogin() {
         goTo("/alerts");
         page.waitForURL(Pattern.compile(".*/login"));
         Assert.assertTrue(page.url().contains("/login"));
     }
 
-    @Test(description = "The wishlist is public — anonymous visitors are NOT redirected")
+    @Test(priority = 2, description = "The wishlist is public — anonymous visitors are NOT redirected")
     public void wishlistDoesNotRequireAuth() {
         goTo("/wishlist");
         // No sleep-and-check: if this were about to redirect to /login, .wl-page

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.fomograb</groupId>
+    <artifactId>fomograb-ui-tests</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>FomoGrab UI Test Framework</name>
+    <description>Playwright + Java + TestNG UI automation suite for fomograb.com</description>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <playwright.version>1.62.0</playwright.version>
+        <testng.version>7.12.0</testng.version>
+        <allure.version>2.35.4</allure.version>
+        <slf4j.version>2.0.18</slf4j.version>
+        <logback.version>1.6.3</logback.version>
+
+        <maven.compiler.plugin.version>3.14.1</maven.compiler.plugin.version>
+        <maven.surefire.plugin.version>3.5.6</maven.surefire.plugin.version>
+        <exec.plugin.version>3.6.3</exec.plugin.version>
+
+        <!-- Overridable from the command line: -Dbase.url=... -Dbrowser=... -Dheadless=... -->
+        <base.url>http://localhost:5173</base.url>
+        <browser>chromium</browser>
+        <headless>true</headless>
+        <!-- TestNG group filter, e.g. -Dgroups=smoke or -Dgroups=smoke,regression -->
+        <groups>smoke,regression,auth</groups>
+        <excludedGroups>prod-smoke</excludedGroups>
+        <suiteXmlFile>testng.xml</suiteXmlFile>
+    </properties>
+
+    <dependencies>
+        <!-- Browser automation -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>${playwright.version}</version>
+        </dependency>
+
+        <!-- Test engine -->
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>${testng.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Reporting -->
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-testng</artifactId>
+            <version>${allure.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <finalName>fomograb-ui-tests</finalName>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.plugin.version}</version>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven.surefire.plugin.version}</version>
+                <configuration>
+                    <systemPropertyVariables>
+                        <base.url>${base.url}</base.url>
+                        <browser>${browser}</browser>
+                        <headless>${headless}</headless>
+                        <allure.results.directory>${project.build.directory}/allure-results</allure.results.directory>
+                    </systemPropertyVariables>
+                    <!-- testng.xml (see project root) defines the suite structure — which test
+                         classes exist and how classes are parallelized. -Dgroups / -DexcludedGroups
+                         further filter within that: run `./mvnw test` for the default
+                         smoke+regression+auth run, or `./mvnw test -Dgroups=smoke` for just smoke. -->
+                    <!-- The Allure listener is registered once, in testng.xml's <listeners> —
+                         not duplicated here, since allure-testng also auto-registers itself via
+                         a service loader and TestNG otherwise logs "Ignoring duplicate listener". -->
+                    <suiteXmlFiles>
+                        <suiteXmlFile>${suiteXmlFile}</suiteXmlFile>
+                    </suiteXmlFiles>
+                </configuration>
+            </plugin>
+
+            <!-- Helper task, NOT bound to any lifecycle phase: run explicitly with
+                 `./mvnw exec:java@install-browsers` after a fresh checkout, or whenever
+                 Playwright's bundled browser binaries need to be (re)installed. Kept out
+                 of the normal build so `mvn test` never silently downloads ~1GB. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>${exec.plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>install-browsers</id>
+                        <phase>none</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.microsoft.playwright.CLI</mainClass>
+                            <arguments>
+                                <argument>install</argument>
+                                <argument>--with-deps</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

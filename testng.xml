@@ -1,0 +1,45 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<!--
+    Suite structure for the FomoGrab UI test framework.
+
+    parallel="classes" is load-bearing: TestNG guarantees every method of a
+    given class runs on the SAME thread when parallelizing at class granularity,
+    which is exactly what BaseTest relies on — one Playwright + Browser pair per
+    class (Playwright Java forbids driving a connection from more than one
+    thread). Different classes may still run concurrently with each other.
+
+    The "Auth" <test> below overrides thread-count to 1: server/routes/auth.js
+    rate-limits login/signup, so those classes must not race each other even
+    though other suites do. "Prod Smoke" is defined here but excluded from the
+    default Maven run (see pom.xml's <excludedGroups>) — run it explicitly with
+    -Dgroups=prod-smoke when you actually want to hit https://www.fomograb.com.
+-->
+<suite name="FomoGrab UI Suite" parallel="classes" thread-count="3">
+
+    <!-- No explicit Allure <listeners> block: allure-testng registers itself via
+         Java's ServiceLoader (its META-INF/services entry) the moment it's on the
+         classpath. Declaring it again here just produces a harmless but noisy
+         "Ignoring duplicate listener" warning per <test> block. -->
+
+    <test name="Smoke">
+        <packages>
+            <package name="com.fomograb.uitests.tests.smoke"/>
+        </packages>
+    </test>
+
+    <test name="Regression">
+        <packages>
+            <package name="com.fomograb.uitests.tests.browse"/>
+            <package name="com.fomograb.uitests.tests.product"/>
+            <package name="com.fomograb.uitests.tests.wishlist"/>
+        </packages>
+    </test>
+
+    <test name="Auth" thread-count="1">
+        <packages>
+            <package name="com.fomograb.uitests.tests.auth"/>
+            <package name="com.fomograb.uitests.tests.submitdeal"/>
+        </packages>
+    </test>
+
+</suite>

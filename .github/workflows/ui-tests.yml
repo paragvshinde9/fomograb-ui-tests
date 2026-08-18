@@ -1,0 +1,94 @@
+name: UI tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Daily production health check (see the prod-smoke job) — independent of
+    # the main suite, needs no staging deployment or secrets to be useful.
+    - cron: "0 6 * * *"
+
+jobs:
+  ui-tests:
+    name: Smoke + Regression + Auth
+    runs-on: ubuntu-latest
+    # Requires the FomoGrab app (frontend + backend) to be reachable at
+    # FG_BASE_URL — point this repo variable at a staging deployment.
+    # Without it configured, this job will run against localhost and fail,
+    # which is expected: see README "Environments".
+    env:
+      FG_BASE_URL: ${{ vars.FG_BASE_URL }}
+      FG_TEST_USER_EMAIL: ${{ secrets.FG_TEST_USER_EMAIL }}
+      FG_TEST_USER_PASSWORD: ${{ secrets.FG_TEST_USER_PASSWORD }}
+      FG_HEADLESS: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+
+      - name: Install Playwright browsers
+        run: ./mvnw -B exec:java@install-browsers
+
+      - name: Run smoke + regression + auth
+        run: ./mvnw -B test -Dgroups=smoke,regression,auth
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-results
+          path: |
+            target/surefire-reports/
+            target/allure-results/
+            target/test-results/
+          retention-days: 14
+
+  prod-smoke:
+    name: Production smoke (read-only, https://www.fomograb.com)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pom.xml') }}
+
+      - name: Install Playwright browsers
+        run: ./mvnw -B exec:java@install-browsers
+
+      - name: Run production smoke checks
+        run: ./mvnw -B test -Dgroups=prod-smoke -DexcludedGroups=
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-smoke-results
+          path: |
+            target/surefire-reports/
+            target/allure-results/
+            target/test-results/
+          retention-days: 14

@@ -1,0 +1,24 @@
+# Build output
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+
+# Playwright / test artifacts
+test-results/
+playwright-report/
+allure-results/
+allure-report/
+
+# Env / secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

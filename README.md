@@ -49,11 +49,16 @@ they don't fail the build:
 ```bash
 export FG_TEST_USER_EMAIL="uitests@example.com"      # PowerShell: $env:FG_TEST_USER_EMAIL="..."
 export FG_TEST_USER_PASSWORD="whatever-you-seeded"
+
+# Backend origin, for tests that mint a session over HTTP instead of driving the
+# login form (see "Signing in without the login form"). Defaults to port 5000,
+# which is the app's own local default — override if your backend differs.
+export FG_API_URL="http://localhost:5000"
 ```
 
 Seed that account once with the app's own script (`node server/seedTestUser.js`
 in the fomograb repo) — the suite never creates accounts through the UI itself,
-because `server/routes/auth.js` rate-limits signup/login and a real signup also
+because the backend rate-limits signup/login and a real signup also
 fires a verification email.
 
 ## Project layout
@@ -61,7 +66,7 @@ fires a verification email.
 ```
 src/test/java/com/fomograb/uitests/
 ├── config/
-│   ├── TestConfig.java       # base.url / browser / headless / timeouts — all overridable
+│   ├── TestConfig.java       # base.url / api.url / browser / headless / timeouts — all overridable
 │   └── TestUsers.java        # seeded test-account credentials, read from env vars only
 ├── core/
 │   ├── BaseTest.java         # every test extends this: owns the Playwright/Browser/
@@ -70,7 +75,10 @@ src/test/java/com/fomograb/uitests/
 │   ├── FailureArtifacts.java # screenshot + trace capture, wired from BaseTest
 │   ├── RetryAnalyzer.java    # retries a failed test once (flake absorption, not bug-hiding)
 │   ├── RetryTransformer.java # auto-applies RetryAnalyzer to every @Test — registered in testng.xml
-│   └── Tags.java             # TestNG group-name constants (smoke/regression/auth/prod-smoke/e2e)
+│   ├── Tags.java             # TestNG group-name constants (smoke/regression/auth/prod-smoke/e2e)
+│   └── api/
+│       └── ApiSessions.java  # mints a signed-in session over HTTP, for tests that need to
+│                             #   *be* logged in rather than to test logging in
 ├── pages/                    # one class per screen — the Page Object Model
 │   ├── BasePage.java
 │   ├── DashboardPage.java    # home: search, category nav, product grid, "Load More", session/logout
@@ -80,7 +88,7 @@ src/test/java/com/fomograb/uitests/
 │   ├── SubmitDealPage.java / MySubmissionsPage.java
 │   └── CookieConsentBanner.java
 └── tests/                    # the actual test classes, one package per feature area
-    ├── smoke/                # HomepageSmokeTest, ProdSmokeTest
+    ├── smoke/                # HomepageSmokeTest, CookieConsentTest, ProdSmokeTest
     ├── browse/               # SearchAndBrowseTest
     ├── auth/                 # LoginTest, SignupValidationTest, RouteGuardTest,
     │                         #   LoginSubmitDealLogoutE2ETest, SignupToVerificationE2ETest (disabled)
@@ -112,7 +120,8 @@ pom.xml          # dependencies, default groups, Surefire wiring
 
 ### How `BaseTest` manages the browser (read this before touching it)
 
-- One `Playwright` + `Browser` per **test class**, created in `@BeforeClass`.
+- One `Playwright` + `Browser` per **test class**, created in `@BeforeClass`, held
+  in **instance** fields.
 - One `BrowserContext` + `Page` per **test method**, created in `@BeforeMethod` —
   this is Playwright's recommended isolation unit (like a fresh private window),
   so tests never see another test's cookies/localStorage/session.
@@ -124,6 +133,66 @@ pom.xml          # dependencies, default groups, Surefire wiring
   which is TestNG's guarantee that every method of one class runs on a single
   thread — required because a Playwright connection can only be driven from the
   thread that created it. Different classes can (and do) run concurrently.
+
+**Two rules that follow from that last point, both learned the hard way:**
+
+1. **Never make the `Playwright`/`Browser` fields `static`.** They were, and it
+   was a race: with `thread-count="3"` three classes write the same two fields
+   in `@BeforeClass`, last writer wins, and the others end up driving a browser
+   created on a different thread while their own Playwright processes leak — and
+   the first `@AfterClass` to finish closes a browser two other classes are
+   still using. TestNG instantiates each test class separately, so plain
+   instance fields are already scoped correctly per class *and* per thread.
+2. **Never put `timeOut` on a `@Test` in this suite.** TestNG implements method
+   timeouts by running the body on a *separate thread* from `@BeforeMethod` —
+   so `page` and `context` get handed to a thread that didn't create them. Use
+   Playwright's own timeouts instead (`navigation.timeout`, per-call
+   `setTimeout(...)`), which also fail better: a real Playwright error with a
+   saved trace, instead of a bare TestNG timeout with no artifacts.
+   `ProdSmokeTest` shows the pattern.
+
+Both of these were silent — the suite "passed" while `RetryAnalyzer` absorbed
+the resulting flake. That is the argument for making flake *visible* rather than
+simply retried.
+
+### Cookie consent is pre-accepted, not clicked
+
+Every context gets an init script that writes the app's `fg_cookie_consent` key
+before any page script runs, so the banner never mounts. `goTo()` therefore just
+navigates.
+
+It used to wait up to 2.5s for the banner and click "Accept All" on every
+navigation — which was both slow and a race, because once the choice is stored
+the banner never appears again, so every *later* navigation in the same test
+burned the full timeout waiting for an element that would never show up.
+
+The one test whose subject *is* the banner overrides
+`preSeedCookieConsent()` to `false`. Since that hook is per-class, it lives in
+its own class (`CookieConsentTest`) rather than inside `HomepageSmokeTest`.
+
+### Signing in without the login form
+
+Tests that need to **be** signed in (currently `SubmitDealTest`) override
+`storageState()` and get a session minted over HTTP by `core/api/ApiSessions`,
+seeded into the context before the first navigation — no login form, no
+Turnstile widget. Tests whose subject *is* logging in (`LoginTest`, and the
+login→logout journey in `LoginSubmitDealLogoutE2ETest`) still drive the real UI,
+because that is the thing they are testing.
+
+This works because of how the app carries a session: the short-lived access
+token is kept **in memory only**, and the session is restored on page load from
+an `httpOnly` cookie — so seeding that cookie is enough. The cookie belongs to
+the **API** origin, which is why `FG_API_URL` exists separately from
+`FG_BASE_URL`. Point them at a matching pair, or the cookie is minted for the
+wrong host and the session silently won't apply — which looks like a bad test
+account rather than a config mistake.
+
+⚠️ **Do not "optimise" this by caching the session to a file.** That is the usual
+advice and it does not work here: session tokens are single-use, so a shared
+cache file holds a token the first context has already consumed, and later
+contexts fail as intermittent auth flake rather than a clean error.
+`ApiSessions` therefore mints a fresh session per test method — a few hundred
+milliseconds, and the whole class of problem goes away.
 
 ## How elements are located
 
@@ -144,6 +213,27 @@ So locators are built, in priority order, from what real markup it does have:
    are the app's own hand-written class names, not test-only hooks, so they're
    as stable as the app's CSS.
 
+### ⚠️ The homepage has two layouts, and `.product-card` is the rarer one
+
+`Dashboard.tsx` renders one of two things depending on `isBrowseMode`:
+
+| Mode | When | Card class | Name element |
+|---|---|---|---|
+| **Homepage** | a bare `/`, no search/filter | `.section-product-card` | `p.section-card-name` |
+| **Browse** | once a search, category, filter or sort is applied | `.product-card` | `h5` |
+
+So on a bare `/`, the flat `.product-card` grid **never renders at all** — the
+page is a set of curated sections ("Smartphones", "Laptops", …). The sectioned
+homepage landed in the app on 2026-06-10.
+
+`DashboardPage.productCards()` still matches only `.product-card`, which means
+`HomepageSmokeTest`, `SearchAndBrowseTest` and `BrowseToWishlistE2ETest` all
+assume browse-mode markup on a page that serves homepage-mode markup. They pass
+today only against a backend whose curated sections come back empty; against
+production-like data they fail with "element(s) not found". `ProdSmokeTest` hit
+exactly this and now matches either layout — the rest still need fixing, in the
+one place they share (`DashboardPage:81`).
+
 Several tests (`SearchAndBrowseTest`, `ProductDetailTest`, `WishlistTest`)
 deliberately read whatever the **first real product card** on the homepage is,
 rather than hardcoding a product name. That makes them pass against any real
@@ -156,25 +246,35 @@ database to run at all.
 | Group | Target | Notes |
 |---|---|---|
 | `smoke`, `regression`, `auth` | `-Dbase.url` (default `http://localhost:5173`) | Your local dev stack or a staging deploy. |
+| `auth` also reads | `-Dapi.url` (default `http://localhost:5000`) | Backend origin, for the HTTP-minted session. Must match the API the frontend is built against. |
 | `prod-smoke` | hardcoded `https://www.fomograb.com` inside `ProdSmokeTest` | Ignores `-Dbase.url` on purpose. |
 
-**Never point the `auth`/`submitdeal` groups at production.** Two reasons,
-both found in the app's own source:
+**Never point the `auth`/`submitdeal` groups at production.** Two reasons:
 
-- `src/config.ts` falls back to Cloudflare's universal *always-passes*
-  Turnstile test key (`1x00000000000000000000AA`) whenever
-  `VITE_TURNSTILE_SITE_KEY` isn't set at build time — true for local dev and
-  most staging builds, which is exactly why login/signup are automatable
-  there. Production sets a real site key, which will simply block a scripted
-  browser.
-- `server/routes/auth.js` rate-limits login/signup. Even if Turnstile weren't
-  in the way, scripted attempts would just start 429-ing real users.
+- **Bot protection.** Environments meant to be automated (local dev, and
+  staging builds configured for testing) accept a placeholder bot-check token,
+  which is exactly why login/signup are scriptable there. Production runs real
+  bot protection and will simply block a scripted browser. Minting the session
+  over HTTP (`ApiSessions`) doesn't change that — the token is validated
+  server-side too.
+- **Rate limiting.** Login and signup are rate-limited. Even without the bot
+  check in the way, scripted attempts against production would just start
+  429-ing real users.
 
 `prod-smoke` exists precisely so you still get a live health check of
-production — homepage renders, `robots.txt`/`sitemap.xml` are served, a direct
-product URL deep-links correctly — without touching anything that writes data
-or fights the site's own bot defenses. It's excluded from the default
-`./mvnw test` run (see `excludedGroups` in `pom.xml`) — opt in explicitly:
+production — the homepage renders product cards, `robots.txt`/`sitemap.xml` are
+served, and a product URL deep-links on a cold load (which is what actually
+exercises the SPA hosting rewrite) — without touching anything that writes data
+or fights the site's own bot defenses.
+
+It also carries `sitemapProductUrlsResolve`, currently `@Test(enabled = false)`:
+it samples the sitemap and checks the URLs resolve, which is worth guarding
+because a page listing no product still returns HTTP 200 and "loads" fine, so
+nothing else here would notice. See its Javadoc for why it is parked rather than
+deleted.
+
+The group is excluded from the default `./mvnw test` run (see `excludedGroups`
+in `pom.xml`) — opt in explicitly:
 
 ```bash
 ./mvnw test -Dgroups=prod-smoke -DexcludedGroups=
@@ -231,12 +331,20 @@ where they earn their place — not sprinkled in for their own sake:
 - **`SoftAssert`** (`HomepageSmokeTest.footerQuickLinksAreAllPresent`) —
   checks six independent footer links and reports every missing one in a
   single run, instead of stopping at the first and playing whack-a-mole.
-- **`invocationCount`** (`SearchAndBrowseTest.categoryMenuOpensAndClosesReliably`) —
-  runs the same interaction 3 independent times to catch occasional timing
-  flake that a single run has a real chance of missing.
-- **`timeOut`** (`ProdSmokeTest`, every method) — an explicit cap on the one
-  class that talks to a real third-party-fronted host outside our control, so
-  a stalled edge response fails fast and visibly instead of hanging a CI job.
+- **`invocationCount`** — deliberately **not** used, and worth knowing why.
+  `SearchAndBrowseTest.categoryMenuOpensAndClosesReliably` used it to repeat a
+  flaky interaction 3 times, but TestNG shares **one** `IRetryAnalyzer` instance
+  across all invocations of a method: the first failure spent the suite's single
+  retry and invocations 2 and 3 ran with no flake protection — the opposite of
+  that test's purpose. Nothing on `ITestResult` distinguishes "next invocation"
+  from "retry of the previous one", so the repetition moved into a loop inside
+  the method, where it is one test with one working retry budget.
+  `@DataProvider` is unaffected: each row genuinely gets its own analyzer
+  instance, which is why the parameterised sweep below still works as expected.
+- **`timeOut`** — deliberately **not** used either; see rule 2 under "How
+  `BaseTest` manages the browser". `ProdSmokeTest` needs a fail-fast budget (it
+  is the one class talking to a real third-party-fronted host), and gets it from
+  Playwright's own navigation/request timeouts instead.
 - **`priority`** (`RouteGuardTest`) — purely for report readability (the tests
   aren't order-dependent); the three "redirected" cases read as the rule and
   the public-wishlist counterexample reads more clearly reported last.

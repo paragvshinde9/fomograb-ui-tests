@@ -19,6 +19,22 @@ import org.testng.ITestResult;
  *
  * <p>Applied to every {@code @Test} automatically by {@link RetryTransformer} —
  * you don't need to add {@code retryAnalyzer = RetryAnalyzer.class} yourself.
+ *
+ * <h2>Known limitation: do not use {@code invocationCount}</h2>
+ *
+ * TestNG creates one analyzer instance per {@code @Test} <b>method</b>, not per
+ * invocation. With {@code invocationCount = N} all N invocations therefore share
+ * this single {@code retries} counter: the first failure spends it and the rest
+ * run unprotected. Verified against TestNG 7.12 — the counter is already at 1 by
+ * the second invocation, and nothing exposed on {@code ITestResult} distinguishes
+ * "next invocation" from "retry of the previous one"
+ * ({@code getCurrentInvocationCount()} increments for both).
+ *
+ * <p>So repeat a flaky interaction with a loop inside one test method instead —
+ * see {@code SearchAndBrowseTest#categoryMenuOpensAndClosesReliably}.
+ * {@code @DataProvider} is unaffected: each row genuinely gets its own analyzer
+ * instance, so {@code SignupValidationTest}'s parameterised sweep retries
+ * per-row as you would expect.
  */
 public class RetryAnalyzer implements IRetryAnalyzer {
 

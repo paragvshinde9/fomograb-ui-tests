@@ -4,7 +4,7 @@ package com.fomograb.uitests.config;
  * Credentials for a pre-seeded, non-admin account used by auth-gated tests.
  *
  * Intentionally NOT created through the UI on every run: the backend rate-limits
- * signup/login (see server/routes/auth.js) and every real signup also fires a
+ * signup/login, and every real signup also fires a
  * verification email. Seed this account once with the backend's own script
  * ({@code node server/seedTestUser.js}) and point these env vars at it —
  * never hardcode credentials in source or commit them.

@@ -21,6 +21,21 @@ public final class TestConfig {
         return resolve("base.url", "FG_BASE_URL", "http://localhost:5173");
     }
 
+    /**
+     * Base URL of the <b>backend API</b>, which is a different origin from
+     * {@link #baseUrl()} — the frontend reads it from {@code VITE_API_URL}
+     * (see the app's {@code src/config.ts}) and defaults to port 5000 locally.
+     *
+     * <p>Used by {@link com.fomograb.uitests.core.api.ApiSessions} to mint a
+     * real session over HTTP instead of driving the login form. Point this at
+     * whatever API the frontend under test is built against — if they disagree,
+     * the cookie minted here is for the wrong host and the seeded session
+     * silently won't apply.
+     */
+    public static String apiUrl() {
+        return resolve("api.url", "FG_API_URL", "http://localhost:5000");
+    }
+
     public static String browserName() {
         return resolve("browser", "FG_BROWSER", "chromium");
     }
@@ -35,6 +50,29 @@ public final class TestConfig {
 
     public static int defaultTimeoutMillis() {
         return Integer.parseInt(resolve("timeout", "FG_TIMEOUT", "10000"));
+    }
+
+    /**
+     * Timeout for Playwright's web-first assertions ({@code assertThat(...)}).
+     *
+     * <p>This is deliberately a separate knob that defaults to the same value as
+     * {@link #defaultTimeoutMillis()}: {@code BrowserContext.setDefaultTimeout}
+     * does <b>not</b> apply to assertions, which carry their own independent
+     * 5s default. Left alone, actions waited 10s while assertions gave up at 5s
+     * — so a slow-but-working page failed on the assertion, not the action.
+     */
+    public static int assertionTimeoutMillis() {
+        return Integer.parseInt(resolve("assertion.timeout", "FG_ASSERTION_TIMEOUT",
+            String.valueOf(defaultTimeoutMillis())));
+    }
+
+    /**
+     * Timeout for page navigations. Higher than {@link #defaultTimeoutMillis()}
+     * because a cold SPA load (or a real CDN-fronted production host) legitimately
+     * takes longer than an in-page interaction.
+     */
+    public static int navigationTimeoutMillis() {
+        return Integer.parseInt(resolve("navigation.timeout", "FG_NAVIGATION_TIMEOUT", "20000"));
     }
 
     /**

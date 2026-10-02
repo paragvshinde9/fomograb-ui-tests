@@ -10,7 +10,7 @@ import org.testng.annotations.Test;
 
 /**
  * Login.tsx. See testng.xml — this whole "auth" test package is deliberately
- * run single-threaded, because server/routes/auth.js rate-limits both login
+ * run single-threaded, because the backend rate-limits both login
  * and signup; running these concurrently with themselves would just produce
  * flaky 429s instead of real signal.
  */

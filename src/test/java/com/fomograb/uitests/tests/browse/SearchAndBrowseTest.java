@@ -61,24 +61,44 @@ public class SearchAndBrowseTest extends BaseTest {
     }
 
     /**
-     * {@code invocationCount} runs this as three separate, independent
-     * executions (each with BaseTest's usual fresh browser context — TestNG
-     * calls {@code @BeforeMethod}/{@code @AfterMethod} around every invocation,
-     * same as for three distinct {@code @Test} methods). The point isn't
-     * "state leaking within one session" — it's catching the kind of
-     * occasional timing flake (an animation/hover race in the open/close
-     * toggle) that a single run has a real chance of not hitting at all.
+     * Repeats the open/close toggle several times, re-navigating between rounds,
+     * to catch the kind of occasional timing flake (an animation/hover race) that
+     * a single run has a real chance of not hitting at all.
+     *
+     * <p>This used {@code invocationCount = 3}, which was subtly broken: TestNG
+     * shares <b>one</b> {@code IRetryAnalyzer} instance across all invocations of
+     * a method, so the first failure consumed the suite's single retry and
+     * invocations 2 and 3 ran with no flake protection at all — the exact
+     * opposite of this test's purpose. Verified against TestNG 7.12:
+     *
+     * <pre>
+     * analyzer@2f112965 retriesSoFar=0 -> RETRYING
+     * analyzer@2f112965 retriesSoFar=1 -> NO RETRY LEFT   (invocation 2)
+     * analyzer@2f112965 retriesSoFar=1 -> NO RETRY LEFT   (invocation 3)
+     * </pre>
+     *
+     * There is no reliable way to tell "a new invocation" from "a retry of the
+     * previous one" inside the analyzer — {@code getCurrentInvocationCount()}
+     * increments for both. So the repetition moved into the method body, where it
+     * is one test with one working retry budget. {@code @DataProvider} rows are
+     * <i>not</i> affected: those each get their own analyzer instance, which is
+     * why {@code SignupValidationTest} still uses one.
      */
-    @Test(invocationCount = 3, description = "The category menu opens and closes reliably across repeated, independent runs")
+    @Test(description = "The category menu opens and closes reliably across repeated rounds")
     public void categoryMenuOpensAndClosesReliably() {
-        goTo("/");
-        DashboardPage dashboard = new DashboardPage(page);
+        int rounds = 3;
+        for (int round = 1; round <= rounds; round++) {
+            goTo("/");
+            DashboardPage dashboard = new DashboardPage(page);
 
-        dashboard.openCategoryMenu();
-        Assert.assertTrue(dashboard.isCategoryMenuExpanded(), "Menu should report expanded after opening");
+            dashboard.openCategoryMenu();
+            Assert.assertTrue(dashboard.isCategoryMenuExpanded(),
+                "Menu should report expanded after opening (round " + round + " of " + rounds + ")");
 
-        dashboard.closeCategoryMenu();
-        Assert.assertFalse(dashboard.isCategoryMenuExpanded(), "Menu should report collapsed after closing");
+            dashboard.closeCategoryMenu();
+            Assert.assertFalse(dashboard.isCategoryMenuExpanded(),
+                "Menu should report collapsed after closing (round " + round + " of " + rounds + ")");
+        }
     }
 
     @Test(description = "Load More appends additional cards without losing the ones already shown")

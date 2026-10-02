@@ -2,7 +2,6 @@ package com.fomograb.uitests.tests.smoke;
 
 import com.fomograb.uitests.core.BaseTest;
 import com.fomograb.uitests.core.Tags;
-import com.fomograb.uitests.pages.CookieConsentBanner;
 import com.fomograb.uitests.pages.DashboardPage;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
@@ -48,19 +47,8 @@ public class HomepageSmokeTest extends BaseTest {
         assertThat(dashboard.firstProductCard()).isVisible();
     }
 
-    @Test(description = "Cookie banner accept-all persists across a reload")
-    public void cookieBannerChoicePersists() {
-        // Deliberately bypasses BaseTest#goTo (which auto-dismisses the banner)
-        // since this test is about the banner's own behaviour.
-        page.navigate("/");
-        CookieConsentBanner banner = new CookieConsentBanner(page);
-        assertThat(banner.acceptAllButton()).isVisible();
-        banner.acceptAllButton().click();
-        assertThat(banner.acceptAllButton()).not().isVisible();
-
-        page.reload();
-        assertThat(banner.acceptAllButton()).not().isVisible();
-    }
+    // The cookie banner's own behaviour lives in CookieConsentTest: BaseTest now
+    // pre-accepts the banner for every context, and the opt-out is per-class.
 
     /**
      * Uses {@link SoftAssert} on purpose: this checks six independent footer

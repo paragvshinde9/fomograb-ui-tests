@@ -2,7 +2,7 @@ name: UI tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -11,13 +11,40 @@ on:
     - cron: "0 6 * * *"
 
 jobs:
+  # Always runs, needs no app and no secrets: a PR that breaks compilation is
+  # the one failure this repo can catch entirely on its own, and it would
+  # otherwise go unnoticed whenever the suite job below is skipped.
+  build:
+    name: Compile suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Compile tests
+        run: ./mvnw -B test-compile
+
+      - name: Flag that the UI suite has no target configured
+        if: vars.FG_BASE_URL == ''
+        run: |
+          echo "::warning title=UI suite skipped::The FG_BASE_URL repository variable is not set, so the smoke/regression/auth job did not run. Point it at a staging deployment to enable it — see README 'CI'."
+
   ui-tests:
     name: Smoke + Regression + Auth
     runs-on: ubuntu-latest
-    # Requires the FomoGrab app (frontend + backend) to be reachable at
-    # FG_BASE_URL — point this repo variable at a staging deployment.
-    # Without it configured, this job will run against localhost and fail,
-    # which is expected: see README "Environments".
+    # Needs the FomoGrab app (frontend + backend) reachable at FG_BASE_URL, so
+    # the job is skipped unless that repo variable is set. It used to run
+    # regardless, against a localhost with no app on it inside the runner, and
+    # every push produced the same ~30 ERR_CONNECTION_REFUSED failures — noise
+    # that trains people to ignore a red check. A skipped job says "not
+    # configured" honestly; the build job above still warns about it on every run.
+    if: vars.FG_BASE_URL != ''
     env:
       FG_BASE_URL: ${{ vars.FG_BASE_URL }}
       # Backend origin for the auth group's HTTP-minted session (see README

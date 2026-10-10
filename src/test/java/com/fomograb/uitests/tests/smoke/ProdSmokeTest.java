@@ -65,6 +65,19 @@ public class ProdSmokeTest extends BaseTest {
     private static final double PAGE_BUDGET_MS = 20_000;
     private static final double REQUEST_BUDGET_MS = 15_000;
 
+    /**
+     * No {@link com.fomograb.uitests.core.Preflight} probe for this class.
+     * {@code base.url} is irrelevant here (every navigation below is absolute),
+     * so probing it would fail this class for a local dev server being down —
+     * and probing production instead would report a prod outage as a
+     * configuration error, when the whole point of this class is to report it as
+     * a failing check, with the trace and the budgets documented above.
+     */
+    @Override
+    protected String urlUnderTest() {
+        return null;
+    }
+
     @Test(description = "The live homepage renders with the FomoGrab title")
     public void homepageLoads() {
         page.navigate(PROD_URL + "/", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));

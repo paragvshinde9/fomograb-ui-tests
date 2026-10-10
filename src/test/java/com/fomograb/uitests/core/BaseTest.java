@@ -6,6 +6,7 @@ import com.microsoft.playwright.assertions.PlaywrightAssertions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.ITestResult;
+import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
@@ -84,6 +85,10 @@ public abstract class BaseTest {
 
     @BeforeClass(alwaysRun = true)
     public void launchBrowser() {
+        // Before spending ~400MB of browser process on it, check there is actually
+        // something at the configured URL — see Preflight for why this is a hard
+        // failure and what it replaces.
+        Preflight.requireReachable(urlUnderTest());
         playwright = Playwright.create();
         browser = Browsers.launch(playwright, TestConfig.browserName(), TestConfig.headless(), TestConfig.slowMoMillis());
         // Assertions carry their own timeout, independent of the context's — align them.
@@ -102,6 +107,16 @@ public abstract class BaseTest {
 
     @BeforeMethod(alwaysRun = true)
     public void createContextAndPage() {
+        if (browser == null) {
+            // launchBrowser() didn't get there — a failed Preflight, or Playwright
+            // itself failing to start. alwaysRun (which is about group filtering, so
+            // it has to stay) means TestNG calls us anyway, and without this guard
+            // every method in the class adds a NullPointerException on `browser`,
+            // plus a retry of it, on top of the class's real configuration failure.
+            // Skip instead: the cause is already reported once, against launchBrowser.
+            throw new SkipException("Browser unavailable for " + getClass().getSimpleName()
+                + " - see the configuration failure on launchBrowser for the reason.");
+        }
         Browser.NewContextOptions options = new Browser.NewContextOptions()
             .setBaseURL(TestConfig.baseUrl())
             .setViewportSize(1440, 900);
@@ -181,6 +196,19 @@ public abstract class BaseTest {
      */
     protected String storageState() {
         return null;
+    }
+
+    /**
+     * The origin this class drives, checked for reachability once before the
+     * first browser starts ({@link Preflight}).
+     *
+     * <p>Defaults to the configured {@link TestConfig#baseUrl()}, which is what
+     * every test here navigates relative to. Override to return {@code null} to
+     * skip the check — for a class that hardcodes its own targets and owns its
+     * own fail-fast budget, as {@code ProdSmokeTest} does.
+     */
+    protected String urlUnderTest() {
+        return TestConfig.baseUrl();
     }
 
     /**

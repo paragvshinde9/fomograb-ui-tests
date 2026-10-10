@@ -26,10 +26,21 @@
         <maven.surefire.plugin.version>3.5.6</maven.surefire.plugin.version>
         <exec.plugin.version>3.6.3</exec.plugin.version>
 
-        <!-- Overridable from the command line: -Dbase.url=... -Dbrowser=... -Dheadless=... -->
-        <base.url>http://localhost:5173</base.url>
-        <browser>chromium</browser>
-        <headless>true</headless>
+        <!-- Overridable from the command line: -Dbase.url=... -Dbrowser=... -Dheadless=...
+             These are deliberately EMPTY instead of carrying the real defaults. Surefire
+             forwards all three into the forked test JVM as system properties (see
+             <systemPropertyVariables> below) and TestConfig reads a system property
+             *before* the matching environment variable — so a default written here is
+             passed on every single run and silently beats FG_BASE_URL / FG_BROWSER /
+             FG_HEADLESS. That is exactly how CI came to test http://localhost:5173 from
+             inside a runner with no app on it, despite the workflow setting FG_BASE_URL.
+             Empty means "nothing was passed": TestConfig treats a blank property as
+             absent, falls through to the env var, and only then to its own fallback — so
+             the defaults (localhost:5173 / chromium / headless) live in exactly one
+             place, TestConfig, and the env vars actually work. -->
+        <base.url/>
+        <browser/>
+        <headless/>
         <!-- TestNG group filter, e.g. -Dgroups=smoke or -Dgroups=smoke,regression -->
         <groups>smoke,regression,auth</groups>
         <excludedGroups>prod-smoke</excludedGroups>
@@ -88,6 +99,11 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${maven.surefire.plugin.version}</version>
                 <configuration>
+                    <!-- Forwards the -D flags above into the forked JVM the tests run in.
+                         Anything listed here OVERRIDES the equivalent FG_* environment
+                         variable, because TestConfig prefers system properties — which is
+                         why the properties feeding it default to empty. Don't give them
+                         values here or in <properties>; put defaults in TestConfig. -->
                     <systemPropertyVariables>
                         <base.url>${base.url}</base.url>
                         <browser>${browser}</browser>

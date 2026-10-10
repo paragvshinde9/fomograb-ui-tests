@@ -73,6 +73,8 @@ src/test/java/com/fomograb/uitests/
 │   │                         #   Context/Page lifecycle
 │   ├── Browsers.java         # picks chromium/firefox/webkit
 │   ├── FailureArtifacts.java # screenshot + trace capture, wired from BaseTest
+│   ├── Preflight.java     # one HTTP probe that the app is actually up, before
+│   │                      #   any browser starts — fails the run once, not 30 times
 │   ├── RetryAnalyzer.java    # retries a failed test once (flake absorption, not bug-hiding)
 │   ├── RetryTransformer.java # auto-applies RetryAnalyzer to every @Test — registered in testng.xml
 │   ├── Tags.java             # TestNG group-name constants (smoke/regression/auth/prod-smoke/e2e)
@@ -249,6 +251,14 @@ database to run at all.
 | `auth` also reads | `-Dapi.url` (default `http://localhost:5000`) | Backend origin, for the HTTP-minted session. Must match the API the frontend is built against. |
 | `prod-smoke` | hardcoded `https://www.fomograb.com` inside `ProdSmokeTest` | Ignores `-Dbase.url` on purpose. |
 
+If nothing is listening at the configured `base.url`, the run stops in
+`@BeforeClass` with one message naming the URL and how to change it — it does
+not let 30 tests each rediscover the same connection error (see
+`core/Preflight`). That is a hard failure, not a skip: a missing *optional*
+test account skips the tests that need it, but a missing *app* means nothing was
+tested at all, which must never be able to report green. `ProdSmokeTest` opts
+out (it hardcodes its own targets).
+
 **Never point the `auth`/`submitdeal` groups at production.** Two reasons:
 
 - **Bot protection.** Environments meant to be automated (local dev, and
@@ -368,15 +378,53 @@ Every run produces:
 
 ## CI
 
-`.github/workflows/ui-tests.yml` runs two independent jobs:
+`.github/workflows/ui-tests.yml` runs three independent jobs:
 
+- **`build`** (always) — `./mvnw test-compile`. No app, no secrets; it's the one
+  thing this repo can always check on its own, and it's what catches a PR that
+  breaks compilation while the suite job below is skipped. It also emits a
+  workflow warning when `FG_BASE_URL` isn't configured, so a skipped suite is
+  visible rather than quietly absent.
 - **`ui-tests`** (push/PR/manual) — smoke+regression+auth against
   `vars.FG_BASE_URL`, which you need to set as a repo/environment variable
   pointing at a staging deployment (plus `secrets.FG_TEST_USER_EMAIL` /
-  `FG_TEST_USER_PASSWORD`). Until that's configured it'll run against
-  localhost inside the runner and fail — expected, see "Environments".
+  `FG_TEST_USER_PASSWORD`). **The job is skipped unless `FG_BASE_URL` is set**,
+  because a browser suite with no app to point at has nothing to say. It used to
+  run anyway, against a `localhost:5173` that doesn't exist inside a runner, and
+  every push produced the same ~30 `ERR_CONNECTION_REFUSED` failures — a red
+  check that means "not configured" is worse than no check, because people learn
+  to scroll past it.
 - **`prod-smoke`** (daily cron + manual) — works out of the box, no secrets
-  needed, since it always targets the real production site.
+  needed, since it always targets the real production site. This is the browser
+  coverage you get for free; it is deliberately *not* wired to `pull_request`,
+  so PR status never depends on production (or a cold Render API) being up.
+
+Pointing it at a staging deployment is the whole setup:
+
+```
+Settings > Secrets and variables > Actions > Variables
+  FG_BASE_URL   https://staging.fomograb.com      # frontend
+  FG_API_URL    https://staging-api.fomograb.com  # the API that frontend is built against
+Settings > Secrets and variables > Actions > Secrets
+  FG_TEST_USER_EMAIL / FG_TEST_USER_PASSWORD      # seeded non-admin account
+```
+
+Without `FG_API_URL` and the two secrets the job still runs — the `auth` tests
+just skip themselves (see "Quick start").
+
+### ⚠️ Don't put defaults in `pom.xml`'s `<properties>`
+
+`base.url`, `browser` and `headless` are declared there **empty on purpose**, and
+`FG_BASE_URL` only works because they are. Surefire forwards each of them into
+the forked test JVM as a system property, and `TestConfig` reads a system
+property *before* the matching env var — so a default written in the pom is
+passed on every run and silently outranks the environment. That was a real bug:
+`pom.xml` carried `<base.url>http://localhost:5173</base.url>`, so CI tested
+localhost no matter what `FG_BASE_URL` said, and setting the repo variable would
+not have fixed the failure it appeared to explain.
+
+Precedence, in order: `-Dbase.url=...` on the command line → `FG_BASE_URL` → the
+fallback in `TestConfig`. Defaults belong in `TestConfig` and nowhere else.
 
 ## Extending the suite
 

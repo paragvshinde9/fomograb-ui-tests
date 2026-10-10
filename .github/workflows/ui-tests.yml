@@ -5,6 +5,21 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: Which tests to run
+        type: choice
+        default: smoke
+        options:
+          - smoke
+          - regression
+          - auth
+          - all          # smoke + regression + auth, plus prod-smoke
+          - prod-smoke   # read-only checks against https://www.fomograb.com
+      base_url:
+        description: App URL to test (blank = the FG_BASE_URL repo variable). Ignored by prod-smoke.
+        type: string
+        required: false
   schedule:
     # Daily production health check (see the prod-smoke job) — independent of
     # the main suite, needs no staging deployment or secrets to be useful.
@@ -31,7 +46,7 @@ jobs:
         run: ./mvnw -B test-compile
 
       - name: Flag that the UI suite has no target configured
-        if: vars.FG_BASE_URL == ''
+        if: vars.FG_BASE_URL == '' && inputs.base_url == ''
         run: |
           echo "::warning title=UI suite skipped::The FG_BASE_URL repository variable is not set, so the smoke/regression/auth job did not run. Point it at a staging deployment to enable it — see README 'CI'."
 
@@ -44,9 +59,12 @@ jobs:
     # every push produced the same ~30 ERR_CONNECTION_REFUSED failures — noise
     # that trains people to ignore a red check. A skipped job says "not
     # configured" honestly; the build job above still warns about it on every run.
-    if: vars.FG_BASE_URL != ''
+    # On a manual run, a base_url typed into the form counts as configured, and
+    # choosing prod-smoke skips this job (that suite has its own job below).
+    # On push/PR/schedule `inputs.*` are empty, so only the variable matters.
+    if: (vars.FG_BASE_URL != '' || inputs.base_url != '') && inputs.suite != 'prod-smoke'
     env:
-      FG_BASE_URL: ${{ vars.FG_BASE_URL }}
+      FG_BASE_URL: ${{ inputs.base_url || vars.FG_BASE_URL }}
       # Backend origin for the auth group's HTTP-minted session (see README
       # "Signing in without the login form"). Must be the same API the frontend
       # at FG_BASE_URL is built against, or the session cookie is minted for the
@@ -75,7 +93,8 @@ jobs:
         run: ./mvnw -B exec:java@install-browsers
 
       - name: Run smoke + regression + auth
-        run: ./mvnw -B test -Dgroups=smoke,regression,auth
+        # A single chosen suite on manual runs; the full default set otherwise.
+        run: ./mvnw -B test -Dgroups=${{ (inputs.suite != 'all' && inputs.suite) || 'smoke,regression,auth' }}
 
       - name: Upload test artifacts
         if: always()
@@ -91,7 +110,7 @@ jobs:
   prod-smoke:
     name: Production smoke (read-only, https://www.fomograb.com)
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.suite == 'prod-smoke' || inputs.suite == 'all'))
     steps:
       - uses: actions/checkout@v4
 

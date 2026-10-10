@@ -272,10 +272,22 @@ out (it hardcodes its own targets).
   429-ing real users.
 
 `prod-smoke` exists precisely so you still get a live health check of
-production — the homepage renders product cards, `robots.txt`/`sitemap.xml` are
-served, and a product URL deep-links on a cold load (which is what actually
-exercises the SPA hosting rewrite) — without touching anything that writes data
-or fights the site's own bot defenses.
+production without touching anything that writes data or fights the site's own
+bot defenses. It has 17 read-only checks in four areas:
+
+- **Site and hosting** — homepage title, `robots.txt`, `sitemap.xml`, security
+  headers (HSTS/CSP/nosniff/frame options), `http://` redirecting to `https://`,
+  and a product URL deep-linking on a cold load (which is what actually
+  exercises the SPA hosting rewrite).
+- **Backend API** — `/api/health` reports healthy with the database connected,
+  the products API serves a non-empty catalog, an unknown product answers 404,
+  and loading the homepage triggers no 5xx API calls.
+- **Homepage behaviour** — product cards render, search returns results (the
+  query is taken from the live catalog), the category menu opens and closes,
+  and the theme toggles.
+- **Other public pages** — the login form renders (never submitted), a new
+  visitor's wishlist shows its empty state, and a product page has a valid
+  outbound Buy link (never clicked).
 
 It also carries `sitemapProductUrlsResolve`, currently `@Test(enabled = false)`:
 it samples the sitemap and checks the URLs resolve, which is worth guarding

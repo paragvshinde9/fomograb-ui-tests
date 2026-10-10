@@ -2,6 +2,9 @@ package com.fomograb.uitests.tests.smoke;
 
 import com.fomograb.uitests.core.BaseTest;
 import com.fomograb.uitests.core.Tags;
+import com.fomograb.uitests.pages.DashboardPage;
+import com.fomograb.uitests.pages.LoginPage;
+import com.fomograb.uitests.pages.WishlistPage;
 import com.microsoft.playwright.APIResponse;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
@@ -190,6 +193,155 @@ public class ProdSmokeTest extends BaseTest {
                 + System.lineSeparator() + "Dead slugs: " + dead);
     }
 
+    // -- Backend API ---------------------------------------------------------
+
+    @Test(description = "The production API reports healthy and connected to its database")
+    public void apiHealthIsHealthy() {
+        APIResponse response = context.request().get(PROD_API_URL + "/api/health",
+            RequestOptions.create().setTimeout(REQUEST_BUDGET_MS));
+        Assert.assertEquals(response.status(), 200);
+        String body = response.text();
+        Assert.assertTrue(body.contains("\"status\":\"healthy\""), "API not healthy: " + body);
+        Assert.assertTrue(body.contains("\"mongo\":\"connected\""), "API database not connected: " + body);
+    }
+
+    @Test(description = "The products API serves a non-empty catalog with name, slug and price")
+    public void productsApiReturnsCatalog() {
+        APIResponse response = context.request().get(PROD_API_URL + "/api/products?page=1&limit=5",
+            RequestOptions.create().setTimeout(REQUEST_BUDGET_MS));
+        Assert.assertEquals(response.status(), 200);
+        String body = response.text();
+
+        Matcher total = Pattern.compile("\"total\"\\s*:\\s*(\\d+)").matcher(body);
+        Assert.assertTrue(total.find(), "Response has no total count: " + abbreviate(body));
+        Assert.assertTrue(Integer.parseInt(total.group(1)) > 0, "Catalog is empty (total=0)");
+
+        Assert.assertTrue(SLUG_PATTERN.matcher(body).find(), "Products have no slug");
+        Assert.assertTrue(NAME_PATTERN.matcher(body).find(), "Products have no name");
+        Assert.assertTrue(body.contains("\"bestPrice\""), "Products have no bestPrice");
+    }
+
+    @Test(description = "Asking the API for a product that does not exist answers 404, not a 200 or a crash")
+    public void unknownProductApiReturns404() {
+        APIResponse response = context.request().get(
+            PROD_API_URL + "/api/products/smoke-test-no-such-product-zzz",
+            RequestOptions.create().setTimeout(REQUEST_BUDGET_MS));
+        Assert.assertEquals(response.status(), 404);
+    }
+
+    // -- Hosting / security headers ------------------------------------------
+
+    @Test(description = "The homepage is served with the expected security headers")
+    public void homepageSendsSecurityHeaders() {
+        APIResponse response = context.request().get(PROD_URL + "/",
+            RequestOptions.create().setTimeout(REQUEST_BUDGET_MS));
+        Assert.assertEquals(response.status(), 200);
+        var headers = response.headers();
+        Assert.assertTrue(headers.containsKey("strict-transport-security"), "Missing HSTS header");
+        Assert.assertTrue(headers.containsKey("content-security-policy"), "Missing CSP header");
+        Assert.assertEquals(headers.get("x-content-type-options"), "nosniff");
+        Assert.assertEquals(headers.get("x-frame-options"), "DENY");
+    }
+
+    @Test(description = "Plain http:// is redirected to https://")
+    public void httpRedirectsToHttps() {
+        APIResponse response = context.request().get("http://www.fomograb.com/",
+            RequestOptions.create().setTimeout(REQUEST_BUDGET_MS).setMaxRedirects(0));
+        Assert.assertTrue(response.status() >= 300 && response.status() < 400,
+            "Expected a redirect from http, got HTTP " + response.status());
+        Assert.assertTrue(response.headers().getOrDefault("location", "").startsWith("https://"),
+            "Redirect should go to https, got: " + response.headers().get("location"));
+    }
+
+    // -- Homepage behaviour --------------------------------------------------
+
+    @Test(description = "Loading the homepage makes no failing (5xx) calls to the production API")
+    public void homepageMakesNoServerErrorCalls() {
+        List<String> failures = new ArrayList<>();
+        page.onResponse(r -> {
+            if (r.url().startsWith(PROD_API_URL) && r.status() >= 500) {
+                failures.add(r.status() + " " + r.url());
+            }
+        });
+        page.navigate(PROD_URL + "/", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        assertThat(page.locator(ANY_PRODUCT_CARD).first()).isVisible();
+        page.waitForLoadState(com.microsoft.playwright.options.LoadState.NETWORKIDLE);
+        Assert.assertTrue(failures.isEmpty(), "API returned server errors while loading the homepage: " + failures);
+    }
+
+    @Test(description = "The search bar and category menu are present and the category menu opens")
+    public void searchBarAndCategoryMenuWork() {
+        page.navigate(PROD_URL + "/", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        DashboardPage dashboard = new DashboardPage(page);
+        assertThat(dashboard.searchInput()).isVisible();
+        dashboard.openCategoryMenu();
+        Assert.assertTrue(dashboard.isCategoryMenuExpanded(), "Category menu should report aria-expanded=true");
+        dashboard.closeCategoryMenu();
+        Assert.assertFalse(dashboard.isCategoryMenuExpanded(), "Category menu should close again");
+    }
+
+    @Test(description = "Searching for a real product name returns results")
+    public void searchReturnsResults() {
+        // Query is derived from the live catalog, so this cannot fail just because
+        // a hardcoded product was delisted.
+        String query = firstLiveProductName().split("\\s+")[0];
+        page.navigate(PROD_URL + "/", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        DashboardPage dashboard = new DashboardPage(page);
+        dashboard.search(query);
+        assertThat(page.locator(".product-card").first()).isVisible();
+    }
+
+    @Test(description = "The colour theme can be toggled from the preferences menu")
+    public void themeCanBeToggled() {
+        page.navigate(PROD_URL + "/", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        DashboardPage dashboard = new DashboardPage(page);
+        String before = dashboard.currentColorTheme();
+        dashboard.toggleDarkMode();
+        Assert.assertNotEquals(dashboard.currentColorTheme(), before, "data-theme should change after toggling");
+    }
+
+    // -- Other public pages --------------------------------------------------
+
+    @Test(description = "The login page renders its form (rendering only: nothing is submitted)")
+    public void loginPageRendersForm() {
+        page.navigate(PROD_URL + "/login", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        LoginPage login = new LoginPage(page);
+        assertThat(login.emailInput()).isVisible();
+        assertThat(login.passwordInput()).isVisible();
+        assertThat(login.submitButton()).isVisible();
+    }
+
+    @Test(description = "A first-time visitor's wishlist page shows its empty state")
+    public void wishlistPageShowsEmptyStateForNewVisitor() {
+        page.navigate(PROD_URL + "/wishlist", new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        assertThat(new WishlistPage(page).emptyState()).isVisible();
+    }
+
+    @Test(description = "A product page offers a Buy link that opens a valid outbound URL in a new tab")
+    public void productPageHasValidBuyLink() {
+        page.navigate(PROD_URL + "/product/" + firstLiveProductSlug(),
+            new Page.NavigateOptions().setTimeout(PAGE_BUDGET_MS));
+        // The page renders this button in more than one place; use the visible one.
+        Locator buy = page.locator(".primary-buy-btn:visible").first();
+        assertThat(buy).isVisible();
+        String href = buy.getAttribute("href");
+        Assert.assertTrue(href != null && href.startsWith("http"), "Buy link has no http(s) href: " + href);
+        Assert.assertEquals(buy.getAttribute("target"), "_blank");
+    }
+
+    private String firstLiveProductName() {
+        APIResponse response = context.request().get(PROD_API_URL + "/api/products?page=1&limit=1",
+            RequestOptions.create().setTimeout(REQUEST_BUDGET_MS));
+        Assert.assertEquals(response.status(), 200, "Production products API did not respond");
+        Matcher name = NAME_PATTERN.matcher(response.text());
+        Assert.assertTrue(name.find(), "Production products API returned no products");
+        return name.group(1);
+    }
+
+    private static String abbreviate(String text) {
+        return text.length() <= 300 ? text : text.substring(0, 300) + "...";
+    }
+
     private String firstLiveProductSlug() {
         APIResponse response = context.request().get(PROD_API_URL + "/api/products?page=1&limit=1",
             RequestOptions.create().setTimeout(REQUEST_BUDGET_MS));
@@ -225,6 +377,7 @@ public class ProdSmokeTest extends BaseTest {
 
     private static final int SITEMAP_SAMPLE_SIZE = 10;
     private static final Pattern LOC_PATTERN = Pattern.compile("<loc>\\s*([^<\\s]+)\\s*</loc>");
+    private static final Pattern NAME_PATTERN = Pattern.compile("\"name\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern SLUG_PATTERN = Pattern.compile("\"slug\"\\s*:\\s*\"([^\"]+)\"");
 
     private String fetchText(String url) {

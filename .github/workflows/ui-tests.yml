@@ -23,7 +23,7 @@ on:
   schedule:
     # Daily production health check (see the prod-smoke job) — independent of
     # the main suite, needs no staging deployment or secrets to be useful.
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * 0"
 
 jobs:
   # Always runs, needs no app and no secrets: a PR that breaks compilation is
